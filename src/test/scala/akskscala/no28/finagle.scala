@@ -13,7 +13,7 @@ import java.lang.String
 
 class UsingFinagleClientSuite extends FunSuite with ShouldMatchers {
 
-  test("example") {
+  test("callback example") {
 
     val server = new BlockingServer(8886)
     server.start()
@@ -47,6 +47,7 @@ class UsingFinagleClientSuite extends FunSuite with ShouldMatchers {
               f => f.getContent.toString(CharsetUtil.UTF_8)
             }
           }
+          // #### DO NOT block here #####
           // val result = resultFuture()
           // println("finagle-client(" + ((end - start) / 1000) + "sec):" + result.mkString(","))
           resultFuture onSuccess {
@@ -65,5 +66,49 @@ class UsingFinagleClientSuite extends FunSuite with ShouldMatchers {
     }
 
   }
+
+
+  test("blocking example") {
+
+    val server = new BlockingServer(8886)
+    server.start()
+    Thread.sleep(200L) // waiting for the server's starting up
+
+    ultimately {
+      server.stop()
+    } apply {
+
+      val service = ClientBuilder()
+        .codec(Http())
+        .hosts("127.0.0.1:8886")
+        .hostConnectionLimit(5)
+        .build()
+
+      def request(uri: String) = {
+        val req = new DefaultHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.GET, uri)
+        req.setHeader("Host", "127.0.0.1")
+        req
+      }
+
+      val start = System.currentTimeMillis()
+      val idsFuture = service(request("/ids"))
+      val ids = idsFuture.apply().getContent.toString(CharsetUtil.UTF_8)
+      val nameFutures = (ids.split(",") map {
+        id: String => service(request("/names?id=" + id))
+      }).toList
+      //import com.twitter.conversions.time._
+      val names = Future.collect(nameFutures) map {
+        fs => fs map {
+          f => f.getContent.toString(CharsetUtil.UTF_8)
+        }
+      } apply()
+      //} apply(5.seconds)
+      val end = System.currentTimeMillis()
+      println("finagle-client(" + ((end - start) / 1000) + "sec):" + names.mkString(","))
+
+    }
+
+  }
+
 
 }
